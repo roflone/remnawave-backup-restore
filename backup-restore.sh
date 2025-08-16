@@ -7,7 +7,7 @@ BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
 SCRIPT_NAME="backup-restore.sh"
 SCRIPT_PATH="$INSTALL_DIR/$SCRIPT_NAME"
-RETAIN_BACKUPS_DAYS=7
+RETAIN_BACKUPS_DAYS=3
 SYMLINK_PATH="/usr/local/bin/rw-backup"
 REMNALABS_ROOT_DIR=""
 ENV_NODE_FILE=".env-node"
@@ -525,7 +525,7 @@ create_backup() {
         exit 1
     fi
     print_message "INFO" "Создание PostgreSQL дампа и сжатие в файл..."
-    if ! docker exec -t "remnawave-db" pg_dumpall -c -U "$DB_USER" | gzip -9 > "$BACKUP_DIR/$BACKUP_FILE_DB"; then
+    if ! docker exec -t "remnawave-db" pg_dumpall -c -U "$DB_USER" | gzip -6 > "$BACKUP_DIR/$BACKUP_FILE_DB"; then
         STATUS=$?
         echo -e "${RED}❌ Ошибка при создании дампа PostgreSQL. Код выхода: ${BOLD}$STATUS${RESET}. Проверьте имя пользователя БД и доступ к контейнеру.${RESET}"
         local error_msg="❌ Ошибка при создании дампа PostgreSQL. Код выхода: ${BOLD}${STATUS}${RESET}"
@@ -596,10 +596,54 @@ create_backup() {
 
     if [[ -f "$BACKUP_DIR/$BACKUP_FILE_FINAL" ]]; then
         if [[ "$UPLOAD_METHOD" == "telegram" ]]; then
-            if send_telegram_document "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$caption_text"; then
-                print_message "SUCCESS" "Бэкап успешно отправлен в Telegram."
+            # Проверка лимита размера Telegram (50 МБ). Используем порог 49 МБ для запаса.
+            local file_size_bytes
+            file_size_bytes=$(wc -c < "$BACKUP_DIR/$BACKUP_FILE_FINAL" | tr -d '[:space:]')
+            local telegram_limit_bytes=$((49 * 1024 * 1024))
+
+            if (( file_size_bytes > telegram_limit_bytes )); then
+                print_message "WARN" "Файл больше 49 МБ. Разбиваю архив на части для отправки в Telegram..."
+                local part_prefix="$BACKUP_DIR/$BACKUP_FILE_FINAL.part-"
+                # Разбиение на части по 49 МБ с числовыми суффиксами длиной 3
+                if ! split -b 49m -d -a 3 "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$part_prefix"; then
+                    print_message "ERROR" "Не удалось разбить файл на части. Отправка в Telegram отменена."
+                else
+                    readarray -t PARTS < <(ls -1 "${part_prefix}"* 2>/dev/null)
+                    local total_parts=${#PARTS[@]}
+
+                    if (( total_parts == 0 )); then
+                        print_message "ERROR" "Части архива не найдены после разбиения."
+                    else
+                        local part_index=1
+                        local all_parts_sent=true
+                        for part_path in "${PARTS[@]}"; do
+                            local part_caption="$caption_text (часть ${part_index} из ${total_parts})"
+                            if send_telegram_document "$part_path" "$part_caption"; then
+                                :
+                            else
+                                all_parts_sent=false
+                                print_message "ERROR" "Не удалось отправить часть ${part_index}/${total_parts} в Telegram."
+                                break
+                            fi
+                            part_index=$((part_index + 1))
+                        done
+
+                        if $all_parts_sent; then
+                            print_message "SUCCESS" "Все части бэкапа успешно отправлены в Telegram."
+                            local join_hint="Для восстановления объедините части в один файл и распакуйте: \ncat ${BACKUP_FILE_FINAL}.part-* > ${BACKUP_FILE_FINAL}"
+                            send_telegram_message "${join_hint}" >/dev/null 2>&1 || true
+                        fi
+
+                        # Очистка частей после отправки
+                        rm -f "${part_prefix}"* 2>/dev/null || true
+                    fi
+                fi
             else
-                echo -e "${RED}❌ Ошибка при отправке бэкапа в Telegram. Проверьте настройки Telegram API (токен, ID чата).${RESET}"
+                if send_telegram_document "$BACKUP_DIR/$BACKUP_FILE_FINAL" "$caption_text"; then
+                    print_message "SUCCESS" "Бэкап успешно отправлен в Telegram."
+                else
+                    echo -e "${RED}❌ Ошибка при отправке бэкапа в Telegram. Проверьте настройки Telegram API (токен, ID чата).${RESET}"
+                fi
             fi
         elif [[ "$UPLOAD_METHOD" == "google_drive" ]]; then
             if send_google_drive_document "$BACKUP_DIR/$BACKUP_FILE_FINAL"; then

@@ -20,7 +20,7 @@ jobs:
             📝 *Changelog:*
             ${{ github.event.release.body }}  
             
-            👤 Released by: [${{ github.event.release.author.login }}](https://github.com/distillium)
+            👤 *Released by*: [${{ github.event.release.author.login }}](https://github.com/distillium)
           format: markdown
 
       - name: Send to eGames Chat
@@ -29,11 +29,11 @@ jobs:
           to: ${{ secrets.TELEGRAM_CHAT_ID_2 }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            🚀 *Project:* [${{ github.repository }}](https://github.com/${{ github.repository }})
-            🛠️ *Release:* ${{ github.event.release.tag_name }}  
+            📦 *Project:* [${{ github.event.repository.name }}](https://github.com/${{ github.repository }})
+            🚀 *Release:* ${{ github.event.release.tag_name }}  
             
             📝 *Changelog:*
             ${{ github.event.release.body }}  
             
-            👤 Released by: [${{ github.event.release.author.login }}](https://github.com/distillium)
+            👤 *Released by*: [${{ github.event.release.author.login }}](https://github.com/distillium)
           format: markdown

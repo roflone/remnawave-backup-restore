@@ -14,10 +14,12 @@ jobs:
           to: ${{ secrets.TELEGRAM_CHAT_ID_1 }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            🚀 *Project:* [${{ github.repository }}](https://github.com/${{ github.repository }})
-            🛠️ *Release:* ${{ github.event.release.tag_name }}
+            📦 *Project:* [${{ github.event.repository.name }}](https://github.com/${{ github.repository }})
+            🚀 *Release:* ${{ github.event.release.tag_name }}  
+            
             📝 *Changelog:*
-            ${{ github.event.release.body }}
+            ${{ github.event.release.body }}  
+            
             👤 Released by: [${{ github.event.release.author.login }}](https://github.com/distillium)
           format: markdown
 
@@ -28,8 +30,10 @@ jobs:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
             🚀 *Project:* [${{ github.repository }}](https://github.com/${{ github.repository }})
-            🛠️ *Release:* ${{ github.event.release.tag_name }}
+            🛠️ *Release:* ${{ github.event.release.tag_name }}  
+            
             📝 *Changelog:*
-            ${{ github.event.release.body }}
+            ${{ github.event.release.body }}  
+            
             👤 Released by: [${{ github.event.release.author.login }}](https://github.com/distillium)
           format: markdown

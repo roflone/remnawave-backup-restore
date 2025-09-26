@@ -953,24 +953,25 @@ send_telegram_message() {
         return 1
     fi
 
+    local url="https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
     local data_params=(
         -d chat_id="$CHAT_ID"
         -d text="$escaped_message"
-        -d parse_mode="$parse_mode"
     )
 
-    if [[ -n "$TG_MESSAGE_THREAD_ID" ]]; then
-        data_params+=(-d message_thread_id="$TG_MESSAGE_THREAD_ID")
-    fi
+    [[ -n "$parse_mode" ]] && data_params+=(-d parse_mode="$parse_mode")
+    [[ -n "$TG_MESSAGE_THREAD_ID" ]] && data_params+=(-d message_thread_id="$TG_MESSAGE_THREAD_ID")
 
-    local http_code=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-        "${data_params[@]}" \
-        -w "%{http_code}" -o /dev/null 2>&1)
+    local response
+    response=$(curl -s -X POST "$url" "${data_params[@]}" -w "\n%{http_code}")
+    local body=$(echo "$response" | head -n -1)
+    local http_code=$(echo "$response" | tail -n1)
 
     if [[ "$http_code" -eq 200 ]]; then
         return 0
     else
-        echo -e "${RED}❌ Ошибка отправки сообщения в Telegram. HTTP код: ${BOLD}$http_code${RESET}. Убедитесь, что ${BOLD}BOT_TOKEN${RESET} и ${BOLD}CHAT_ID${RESET} верны.${RESET}"
+        echo -e "${RED}❌ Ошибка отправки сообщения в Telegram. Код: ${BOLD}$http_code${RESET}"
+        echo -e "Ответ от Telegram: ${body}"
         return 1
     fi
 }

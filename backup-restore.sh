@@ -232,7 +232,7 @@ configure_bot_backup() {
                         if [[ ! -d "$custom_bot_path" ]]; then
                             print_message "WARN" "Директория ${BOLD}${custom_bot_path}${RESET} не существует."
                             read -rp "$(echo -e "${GREEN}[?]${RESET} Продолжить с этим путем? ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" confirm_custom_bot_path
-                            if [[ "$confirm_custom_bot_path" != "y" ]]; then
+                            if [[ ! "$confirm_custom_bot_path" =~ ^[yY]$ ]]; then
                                 echo ""
                                 read -rp "Нажмите Enter, чтобы продолжить..."
                                 continue
@@ -602,11 +602,18 @@ restore_bot_backup() {
             return 1
         fi
         
-        if ! docker exec -i "$BOT_CONTAINER_NAME" psql -q -U postgres -d postgres < "$BOT_DUMP_UNCOMPRESSED" > /dev/null 2>&1; then
+        mkdir -p "$temp_restore_dir"
+
+        if ! docker exec -i "$BOT_CONTAINER_NAME" psql -q -U "$restore_bot_db_user" 2> "$temp_restore_dir/restore_errors.log" < "$BOT_DUMP_UNCOMPRESSED"; then
             print_message "ERROR" "Ошибка при восстановлении БД бота."
+            echo ""
+            print_message "WARN" "${YELLOW}Лог ошибок восстановления:${RESET}"
+            cat "$temp_restore_dir/restore_errors.log"
+            [[ -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
+            read -rp "Нажмите Enter для возврата в меню..."
             return 1
         fi
-        
+
         print_message "SUCCESS" "БД бота успешно восстановлена."
     else
         print_message "WARN" "Дамп БД бота не найден в архиве."
@@ -1672,7 +1679,7 @@ restore_backup() {
         return 1
     fi
     
-    if ! docker exec -i remnawave-db psql -q -U postgres -d postgres > /dev/null 2> "$temp_restore_dir/restore_errors.log" < "$DUMP_FILE"; then
+    if ! docker exec -i remnawave-db psql -q -U "${DB_USER}" > /dev/null 2> "$temp_restore_dir/restore_errors.log" < "$DUMP_FILE"; then
         print_message "ERROR" "Ошибка при восстановлении дампа базы данных."
         echo ""
         print_message "WARN" "${YELLOW}Лог ошибок восстановления:${RESET}"

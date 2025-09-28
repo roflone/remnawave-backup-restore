@@ -1462,8 +1462,8 @@ restore_backup() {
     echo ""
     print_message "INFO" "В конфигурации скрипта вы указали имя пользователя БД: ${BOLD}${GREEN}${DB_USER}${RESET}"
     read -rp "$(echo -e "${GREEN}[?]${RESET} Введите ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET} для продолжения: ")" db_user_confirm
-    
-    if [[ "$db_user_confirm" != "y" ]]; then
+
+    if [[ ! "$db_user_confirm" =~ ^[Yy]$ ]]; then
         print_message "INFO" "Операция восстановления отменена пользователем."
         read -rp "Нажмите Enter для возврата в меню..."
         return

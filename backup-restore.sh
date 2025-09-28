@@ -1278,7 +1278,6 @@ setup_auto_send() {
         echo ""
         echo "   1. Включить/перезаписать автоматическую отправку бэкапов"
         echo "   2. Выключить автоматическую отправку бэкапов"
-        echo ""
         echo "   0. Вернуться в главное меню"
         echo ""
         read -rp "${GREEN}[?]${RESET} Выберите пункт: " choice
@@ -1295,47 +1294,65 @@ setup_auto_send() {
                     server_offset_total_minutes=$(( -server_offset_total_minutes ))
                 fi
 
-                echo "Введите желаемое время отправки по UTC+0 (например, 08:00)"
-                read -rp "Вы можете указать несколько времен через пробел: " times
-                
-                valid_times_cron=()
-                local user_friendly_times_local=""
+                echo "Выберите вариант автоматической отправки:"
+                echo "  1) Ввести время (например: 08:00 12:00 18:00)"
+                echo "  2) Ежечасно"
+                echo "  3) Ежедневно"
+                read -rp "Ваш выбор: " send_choice
+                echo ""
+
                 cron_times_to_write=()
-
+                user_friendly_times_local=""
                 invalid_format=false
-                IFS=' ' read -ra arr <<< "$times"
-                for t in "${arr[@]}"; do
-                    if [[ $t =~ ^([0-9]{1,2}):([0-9]{2})$ ]]; then
-                        local hour_utc_input=$((10#${BASH_REMATCH[1]}))
-                        local min_utc_input=$((10#${BASH_REMATCH[2]}))
 
-                        if (( hour_utc_input >= 0 && hour_utc_input <= 23 && min_utc_input >= 0 && min_utc_input <= 59 )); then
-                            local total_minutes_utc=$((hour_utc_input * 60 + min_utc_input))
-                            local total_minutes_local=$((total_minutes_utc + server_offset_total_minutes))
+                if [[ "$send_choice" == "1" ]]; then
+                    echo "Введите желаемое время отправки по UTC+0 (например, 08:00 12:00):"
+                    read -rp "Время через пробел: " times
+                    IFS=' ' read -ra arr <<< "$times"
 
-                            while (( total_minutes_local < 0 )); do
-                                total_minutes_local=$((total_minutes_local + 24 * 60))
-                            done
-                            while (( total_minutes_local >= 24 * 60 )); do
-                                total_minutes_local=$((total_minutes_local - 24 * 60))
-                            done
+                    for t in "${arr[@]}"; do
+                        if [[ $t =~ ^([0-9]{1,2}):([0-9]{2})$ ]]; then
+                            local hour_utc_input=$((10#${BASH_REMATCH[1]}))
+                            local min_utc_input=$((10#${BASH_REMATCH[2]}))
 
-                            local hour_local=$((total_minutes_local / 60))
-                            local min_local=$((total_minutes_local % 60))
-                            
-                            cron_times_to_write+=("$min_local $hour_local")
-                            user_friendly_times_local+="$t "
+                            if (( hour_utc_input >= 0 && hour_utc_input <= 23 && min_utc_input >= 0 && min_utc_input <= 59 )); then
+                                local total_minutes_utc=$((hour_utc_input * 60 + min_utc_input))
+                                local total_minutes_local=$((total_minutes_utc + server_offset_total_minutes))
+
+                                while (( total_minutes_local < 0 )); do
+                                    total_minutes_local=$((total_minutes_local + 24 * 60))
+                                done
+                                while (( total_minutes_local >= 24 * 60 )); do
+                                    total_minutes_local=$((total_minutes_local - 24 * 60))
+                                done
+
+                                local hour_local=$((total_minutes_local / 60))
+                                local min_local=$((total_minutes_local % 60))
+
+                                cron_times_to_write+=("$min_local $hour_local")
+                                user_friendly_times_local+="$t "
+                            else
+                                print_message "ERROR" "Неверное значение времени: ${BOLD}$t${RESET} (часы 0-23, минуты 0-59)."
+                                invalid_format=true
+                                break
+                            fi
                         else
-                            print_message "ERROR" "Неверное значение времени: ${BOLD}$t${RESET} (часы 0-23, минуты 0-59)."
+                            print_message "ERROR" "Неверный формат времени: ${BOLD}$t${RESET} (ожидается HH:MM)."
                             invalid_format=true
                             break
                         fi
-                    else
-                        print_message "ERROR" "Неверный формат времени: ${BOLD}$t${RESET} (ожидается HH:MM)."
-                        invalid_format=true
-                        break
-                    fi
-                done
+                    done
+                elif [[ "$send_choice" == "2" ]]; then
+                    cron_times_to_write=("@hourly")
+                    user_friendly_times_local="@hourly"
+                elif [[ "$send_choice" == "3" ]]; then
+                    cron_times_to_write=("@daily")
+                    user_friendly_times_local="@daily"
+                else
+                    print_message "ERROR" "Неверный выбор."
+                    continue
+                fi
+
                 echo ""
 
                 if [ "$invalid_format" = true ] || [ ${#cron_times_to_write[@]} -eq 0 ]; then
@@ -1344,7 +1361,7 @@ setup_auto_send() {
                 fi
 
                 print_message "INFO" "Настройка cron-задачи для автоматической отправки..."
-                
+
                 local temp_crontab_file=$(mktemp)
 
                 if ! crontab -l > "$temp_crontab_file" 2>/dev/null; then
@@ -1369,9 +1386,13 @@ setup_auto_send() {
                 mv "$temp_crontab_file.tmp" "$temp_crontab_file"
 
                 for time_entry_local in "${cron_times_to_write[@]}"; do
-                    echo "$time_entry_local * * * $SCRIPT_PATH backup >> /var/log/rw_backup_cron.log 2>&1" >> "$temp_crontab_file"
+                    if [[ "$time_entry_local" == "@hourly" ]] || [[ "$time_entry_local" == "@daily" ]]; then
+                        echo "$time_entry_local $SCRIPT_PATH backup >> /var/log/rw_backup_cron.log 2>&1" >> "$temp_crontab_file"
+                    else
+                        echo "$time_entry_local * * * $SCRIPT_PATH backup >> /var/log/rw_backup_cron.log 2>&1" >> "$temp_crontab_file"
+                    fi
                 done
-                
+
                 if crontab "$temp_crontab_file"; then
                     print_message "SUCCESS" "CRON-задача для автоматической отправки успешно установлена."
                 else
@@ -1387,7 +1408,7 @@ setup_auto_send() {
             2)
                 print_message "INFO" "Отключение автоматической отправки..."
                 (crontab -l 2>/dev/null | grep -vF "$SCRIPT_PATH backup") | crontab -
-                
+
                 CRON_TIMES=""
                 save_config
                 print_message "SUCCESS" "Автоматическая отправка успешно отключена."

@@ -470,9 +470,12 @@ restore_bot_backup() {
     IFS='|' read -r BOT_CONTAINER_NAME BOT_VOLUME_NAME BOT_DIR_NAME BOT_SERVICE_NAME <<< "$bot_params"
     
     echo ""
-    read -rp " Введите имя пользователя PostgreSQL для бота (по умолчанию postgres): " restore_bot_db_user
+    read -rp " Введите имя пользователя базы данных бота (по умолчанию postgres): " restore_bot_db_user
     restore_bot_db_user="${restore_bot_db_user:-postgres}"
-    
+    echo ""
+    read -rp "$(echo -e "${GREEN}[?]${RESET} Введите имя базы данных бота (по умолчанию postgres): ")" restore_bot_db_name
+    restore_bot_db_name="${restore_bot_db_name:-postgres}"
+    echo ""
     print_message "INFO" "Начало восстановления Telegram бота..."
     
     if [[ -d "$restore_path" ]]; then
@@ -604,7 +607,7 @@ restore_bot_backup() {
         
         mkdir -p "$temp_restore_dir"
 
-        if ! docker exec -i "$BOT_CONTAINER_NAME" psql -q -U "$restore_bot_db_user" 2> "$temp_restore_dir/restore_errors.log" < "$BOT_DUMP_UNCOMPRESSED"; then
+        if ! docker exec -i "$BOT_CONTAINER_NAME" psql -q -U "$restore_bot_db_user" -d "$restore_bot_db_name" 2> "$temp_restore_dir/restore_errors.log" < "$BOT_DUMP_UNCOMPRESSED"; then
             print_message "ERROR" "Ошибка при восстановлении БД бота."
             echo ""
             print_message "WARN" "${YELLOW}Лог ошибок восстановления:${RESET}"
@@ -1490,12 +1493,16 @@ restore_backup() {
     echo ""
     print_message "INFO" "В конфигурации скрипта вы указали имя пользователя БД: ${BOLD}${GREEN}${DB_USER}${RESET}"
     read -rp "$(echo -e "${GREEN}[?]${RESET} Введите ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET} для продолжения: ")" db_user_confirm
-
+    
     if [[ ! "$db_user_confirm" =~ ^[Yy]$ ]]; then
         print_message "INFO" "Операция восстановления отменена пользователем."
         read -rp "Нажмите Enter для возврата в меню..."
         return
     fi
+
+    echo ""
+    read -rp "$(echo -e "${GREEN}[?]${RESET} Теперь введите имя базы данных панели (по умолчанию postgres): ")" restore_db_name
+    restore_db_name="${restore_db_name:-postgres}"
     
     clear
     
@@ -1700,7 +1707,7 @@ restore_backup() {
         return 1
     fi
     
-    if ! docker exec -i remnawave-db psql -q -U "${DB_USER}" > /dev/null 2> "$temp_restore_dir/restore_errors.log" < "$DUMP_FILE"; then
+    if ! docker exec -i remnawave-db psql -q -U "${DB_USER} -d "$restore_db_name" > /dev/null 2> "$temp_restore_dir/restore_errors.log" < "$DUMP_FILE"; then
         print_message "ERROR" "Ошибка при восстановлении дампа базы данных."
         echo ""
         print_message "WARN" "${YELLOW}Лог ошибок восстановления:${RESET}"

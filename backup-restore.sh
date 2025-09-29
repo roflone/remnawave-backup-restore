@@ -1707,7 +1707,7 @@ restore_backup() {
         return 1
     fi
     
-    if ! docker exec -i remnawave-db psql -q -U "${DB_USER} -d "$restore_db_name" > /dev/null 2> "$temp_restore_dir/restore_errors.log" < "$DUMP_FILE"; then
+    if ! docker exec -i remnawave-db psql -q -U "${DB_USER}" -d "$restore_db_name" > /dev/null 2> "$temp_restore_dir/restore_errors.log" < "$DUMP_FILE"; then
         print_message "ERROR" "Ошибка при восстановлении дампа базы данных."
         echo ""
         print_message "WARN" "${YELLOW}Лог ошибок восстановления:${RESET}"

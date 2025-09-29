@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="2.0.5"
+VERSION="2.1"
 INSTALL_DIR="/opt/rw-backup-restore"
 BACKUP_DIR="$INSTALL_DIR/backup"
 CONFIG_FILE="$INSTALL_DIR/config.env"
@@ -232,7 +232,7 @@ configure_bot_backup() {
                         if [[ ! -d "$custom_bot_path" ]]; then
                             print_message "WARN" "Директория ${BOLD}${custom_bot_path}${RESET} не существует."
                             read -rp "$(echo -e "${GREEN}[?]${RESET} Продолжить с этим путем? ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET}: ")" confirm_custom_bot_path
-                            if [[ "$confirm_custom_bot_path" != "y" ]]; then
+                            if [[ ! "$confirm_custom_bot_path" =~ ^[yY]$ ]]; then
                                 echo ""
                                 read -rp "Нажмите Enter, чтобы продолжить..."
                                 continue
@@ -470,9 +470,12 @@ restore_bot_backup() {
     IFS='|' read -r BOT_CONTAINER_NAME BOT_VOLUME_NAME BOT_DIR_NAME BOT_SERVICE_NAME <<< "$bot_params"
     
     echo ""
-    read -rp " Введите имя пользователя PostgreSQL для бота (по умолчанию postgres): " restore_bot_db_user
+    read -rp " Введите имя пользователя базы данных бота (по умолчанию postgres): " restore_bot_db_user
     restore_bot_db_user="${restore_bot_db_user:-postgres}"
-    
+    echo ""
+    read -rp "$(echo -e "${GREEN}[?]${RESET} Введите имя базы данных бота (по умолчанию postgres): ")" restore_bot_db_name
+    restore_bot_db_name="${restore_bot_db_name:-postgres}"
+    echo ""
     print_message "INFO" "Начало восстановления Telegram бота..."
     
     if [[ -d "$restore_path" ]]; then
@@ -602,11 +605,18 @@ restore_bot_backup() {
             return 1
         fi
         
-        if ! docker exec -i "$BOT_CONTAINER_NAME" psql -q -U postgres -d postgres < "$BOT_DUMP_UNCOMPRESSED" > /dev/null 2>&1; then
+        mkdir -p "$temp_restore_dir"
+
+        if ! docker exec -i "$BOT_CONTAINER_NAME" psql -q -U "$restore_bot_db_user" -d "$restore_bot_db_name" 2> "$temp_restore_dir/restore_errors.log" < "$BOT_DUMP_UNCOMPRESSED"; then
             print_message "ERROR" "Ошибка при восстановлении БД бота."
+            echo ""
+            print_message "WARN" "${YELLOW}Лог ошибок восстановления:${RESET}"
+            cat "$temp_restore_dir/restore_errors.log"
+            [[ -d "$temp_restore_dir" ]] && rm -rf "$temp_restore_dir"
+            read -rp "Нажмите Enter для возврата в меню..."
             return 1
         fi
-        
+
         print_message "SUCCESS" "БД бота успешно восстановлена."
     else
         print_message "WARN" "Дамп БД бота не найден в архиве."
@@ -1271,7 +1281,6 @@ setup_auto_send() {
         echo ""
         echo "   1. Включить/перезаписать автоматическую отправку бэкапов"
         echo "   2. Выключить автоматическую отправку бэкапов"
-        echo ""
         echo "   0. Вернуться в главное меню"
         echo ""
         read -rp "${GREEN}[?]${RESET} Выберите пункт: " choice
@@ -1288,47 +1297,65 @@ setup_auto_send() {
                     server_offset_total_minutes=$(( -server_offset_total_minutes ))
                 fi
 
-                echo "Введите желаемое время отправки по UTC+0 (например, 08:00)"
-                read -rp "Вы можете указать несколько времен через пробел: " times
-                
-                valid_times_cron=()
-                local user_friendly_times_local=""
+                echo "Выберите вариант автоматической отправки:"
+                echo "  1) Ввести время (например: 08:00 12:00 18:00)"
+                echo "  2) Ежечасно"
+                echo "  3) Ежедневно"
+                read -rp "Ваш выбор: " send_choice
+                echo ""
+
                 cron_times_to_write=()
-
+                user_friendly_times_local=""
                 invalid_format=false
-                IFS=' ' read -ra arr <<< "$times"
-                for t in "${arr[@]}"; do
-                    if [[ $t =~ ^([0-9]{1,2}):([0-9]{2})$ ]]; then
-                        local hour_utc_input=$((10#${BASH_REMATCH[1]}))
-                        local min_utc_input=$((10#${BASH_REMATCH[2]}))
 
-                        if (( hour_utc_input >= 0 && hour_utc_input <= 23 && min_utc_input >= 0 && min_utc_input <= 59 )); then
-                            local total_minutes_utc=$((hour_utc_input * 60 + min_utc_input))
-                            local total_minutes_local=$((total_minutes_utc + server_offset_total_minutes))
+                if [[ "$send_choice" == "1" ]]; then
+                    echo "Введите желаемое время отправки по UTC+0 (например, 08:00 12:00):"
+                    read -rp "Время через пробел: " times
+                    IFS=' ' read -ra arr <<< "$times"
 
-                            while (( total_minutes_local < 0 )); do
-                                total_minutes_local=$((total_minutes_local + 24 * 60))
-                            done
-                            while (( total_minutes_local >= 24 * 60 )); do
-                                total_minutes_local=$((total_minutes_local - 24 * 60))
-                            done
+                    for t in "${arr[@]}"; do
+                        if [[ $t =~ ^([0-9]{1,2}):([0-9]{2})$ ]]; then
+                            local hour_utc_input=$((10#${BASH_REMATCH[1]}))
+                            local min_utc_input=$((10#${BASH_REMATCH[2]}))
 
-                            local hour_local=$((total_minutes_local / 60))
-                            local min_local=$((total_minutes_local % 60))
-                            
-                            cron_times_to_write+=("$min_local $hour_local")
-                            user_friendly_times_local+="$t "
+                            if (( hour_utc_input >= 0 && hour_utc_input <= 23 && min_utc_input >= 0 && min_utc_input <= 59 )); then
+                                local total_minutes_utc=$((hour_utc_input * 60 + min_utc_input))
+                                local total_minutes_local=$((total_minutes_utc + server_offset_total_minutes))
+
+                                while (( total_minutes_local < 0 )); do
+                                    total_minutes_local=$((total_minutes_local + 24 * 60))
+                                done
+                                while (( total_minutes_local >= 24 * 60 )); do
+                                    total_minutes_local=$((total_minutes_local - 24 * 60))
+                                done
+
+                                local hour_local=$((total_minutes_local / 60))
+                                local min_local=$((total_minutes_local % 60))
+
+                                cron_times_to_write+=("$min_local $hour_local")
+                                user_friendly_times_local+="$t "
+                            else
+                                print_message "ERROR" "Неверное значение времени: ${BOLD}$t${RESET} (часы 0-23, минуты 0-59)."
+                                invalid_format=true
+                                break
+                            fi
                         else
-                            print_message "ERROR" "Неверное значение времени: ${BOLD}$t${RESET} (часы 0-23, минуты 0-59)."
+                            print_message "ERROR" "Неверный формат времени: ${BOLD}$t${RESET} (ожидается HH:MM)."
                             invalid_format=true
                             break
                         fi
-                    else
-                        print_message "ERROR" "Неверный формат времени: ${BOLD}$t${RESET} (ожидается HH:MM)."
-                        invalid_format=true
-                        break
-                    fi
-                done
+                    done
+                elif [[ "$send_choice" == "2" ]]; then
+                    cron_times_to_write=("@hourly")
+                    user_friendly_times_local="@hourly"
+                elif [[ "$send_choice" == "3" ]]; then
+                    cron_times_to_write=("@daily")
+                    user_friendly_times_local="@daily"
+                else
+                    print_message "ERROR" "Неверный выбор."
+                    continue
+                fi
+
                 echo ""
 
                 if [ "$invalid_format" = true ] || [ ${#cron_times_to_write[@]} -eq 0 ]; then
@@ -1337,7 +1364,7 @@ setup_auto_send() {
                 fi
 
                 print_message "INFO" "Настройка cron-задачи для автоматической отправки..."
-                
+
                 local temp_crontab_file=$(mktemp)
 
                 if ! crontab -l > "$temp_crontab_file" 2>/dev/null; then
@@ -1362,9 +1389,13 @@ setup_auto_send() {
                 mv "$temp_crontab_file.tmp" "$temp_crontab_file"
 
                 for time_entry_local in "${cron_times_to_write[@]}"; do
-                    echo "$time_entry_local * * * $SCRIPT_PATH backup >> /var/log/rw_backup_cron.log 2>&1" >> "$temp_crontab_file"
+                    if [[ "$time_entry_local" == "@hourly" ]] || [[ "$time_entry_local" == "@daily" ]]; then
+                        echo "$time_entry_local $SCRIPT_PATH backup >> /var/log/rw_backup_cron.log 2>&1" >> "$temp_crontab_file"
+                    else
+                        echo "$time_entry_local * * * $SCRIPT_PATH backup >> /var/log/rw_backup_cron.log 2>&1" >> "$temp_crontab_file"
+                    fi
                 done
-                
+
                 if crontab "$temp_crontab_file"; then
                     print_message "SUCCESS" "CRON-задача для автоматической отправки успешно установлена."
                 else
@@ -1380,7 +1411,7 @@ setup_auto_send() {
             2)
                 print_message "INFO" "Отключение автоматической отправки..."
                 (crontab -l 2>/dev/null | grep -vF "$SCRIPT_PATH backup") | crontab -
-                
+
                 CRON_TIMES=""
                 save_config
                 print_message "SUCCESS" "Автоматическая отправка успешно отключена."
@@ -1462,12 +1493,16 @@ restore_backup() {
     echo ""
     print_message "INFO" "В конфигурации скрипта вы указали имя пользователя БД: ${BOLD}${GREEN}${DB_USER}${RESET}"
     read -rp "$(echo -e "${GREEN}[?]${RESET} Введите ${GREEN}${BOLD}Y${RESET}/${RED}${BOLD}N${RESET} для продолжения: ")" db_user_confirm
-
+    
     if [[ ! "$db_user_confirm" =~ ^[Yy]$ ]]; then
         print_message "INFO" "Операция восстановления отменена пользователем."
         read -rp "Нажмите Enter для возврата в меню..."
         return
     fi
+
+    echo ""
+    read -rp "$(echo -e "${GREEN}[?]${RESET} Теперь введите имя базы данных панели (по умолчанию postgres): ")" restore_db_name
+    restore_db_name="${restore_db_name:-postgres}"
     
     clear
     
@@ -1672,7 +1707,7 @@ restore_backup() {
         return 1
     fi
     
-    if ! docker exec -i remnawave-db psql -q -U postgres -d postgres > /dev/null 2> "$temp_restore_dir/restore_errors.log" < "$DUMP_FILE"; then
+    if ! docker exec -i remnawave-db psql -q -U "${DB_USER} -d "$restore_db_name" > /dev/null 2> "$temp_restore_dir/restore_errors.log" < "$DUMP_FILE"; then
         print_message "ERROR" "Ошибка при восстановлении дампа базы данных."
         echo ""
         print_message "WARN" "${YELLOW}Лог ошибок восстановления:${RESET}"

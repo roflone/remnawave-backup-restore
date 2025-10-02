@@ -103,7 +103,6 @@ ufw delete allow from OLD_IP to any port 2222 && ufw allow from NEW_IP to any po
   
 </details>
 
-
 ## Установка (требует root):
 
 ```
